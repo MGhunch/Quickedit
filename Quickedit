@@ -1,0 +1,464 @@
+// =============================
+// QUICK EDIT APP FOR AIRTABLE
+// Electron + React (single-file project layout for reference)
+// =============================
+// This canvas includes all files you need. Create these in a folder.
+// 1) package.json
+// 2) electron/main.js
+// 3) electron/preload.js
+// 4) renderer/index.html
+// 5) renderer/src/App.jsx
+// 6) renderer/src/index.jsx
+// 7) renderer/src/airtable.js
+// 8) .env (for your keys)
+// 9) README.md
+// -----------------------------
+
+// ===== 1) package.json =====
+export const pkg = {
+  "name": "quick-edit-airtable",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently \"vite --config renderer/vite.config.js\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "vite build --config renderer/vite.config.js && electron-builder",
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.0",
+    "concurrently": "^8.2.2",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
+    "vite": "^5.3.0"
+  },
+  "dependencies": {
+    "date-fns": "^3.6.0",
+    "fuse.js": "^7.0.0",
+    "lucide-react": "^0.441.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "build": {
+    "appId": "com.yourname.quickedit",
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "renderer/index.html",
+      "package.json"
+    ],
+    "directories": { "buildResources": "build" }
+  }
+}
+
+// ===== 2) electron/main.js =====
+import { app, BrowserWindow, globalShortcut, nativeTheme, ipcMain, shell } from 'electron'
+import path from 'node:path'
+
+let win
+const isDev = !app.isPackaged
+
+function createWindow() {
+  win = new BrowserWindow({
+    width: 960,
+    height: 640,
+    show: false,
+    frame: false,
+    titleBarStyle: 'hiddenInset',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0b0b0b' : '#ffffff',
+    webPreferences: {
+      preload: path.join(process.cwd(), 'electron', 'preload.js')
+    }
+  })
+
+  const url = isDev ? 'http://localhost:5173' : `file://${path.join(process.cwd(), 'dist', 'index.html')}`
+  win.loadURL(url)
+
+  win.once('ready-to-show', () => win.show())
+
+  // Safety: open external links in browser
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url)
+    return { action: 'deny' }
+  })
+}
+
+app.whenReady().then(() => {
+  createWindow()
+
+  // Register global hotkey (Ctrl/Cmd + A) to toggle window
+  // NOTE: This overrides the usual Select All when the app is focused.
+  // You can change to 'CommandOrControl+Shift+K' if preferred.
+  const ok = globalShortcut.register('CommandOrControl+A', () => {
+    if (!win) return
+    if (win.isVisible()) {
+      if (win.isFocused()) {
+        win.hide()
+      } else {
+        win.focus()
+      }
+    } else {
+      win.show()
+      win.focus()
+    }
+  })
+  if (!ok) console.warn('Global shortcut registration failed.')
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+})
+
+app.on('will-quit', () => globalShortcut.unregisterAll())
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit()
+})
+
+// Pass environment vars securely to renderer via IPC on request
+ipcMain.handle('env:get', () => ({
+  AIRTABLE_API_KEY: process.env.AIRTABLE_API_KEY || '',
+  AIRTABLE_BASE_ID: process.env.AIRTABLE_BASE_ID || '',
+  AIRTABLE_CLIENTS_TABLE: process.env.AIRTABLE_CLIENTS_TABLE || 'Clients',
+  AIRTABLE_JOBS_TABLE: process.env.AIRTABLE_JOBS_TABLE || 'Jobs',
+  AIRTABLE_CLIENT_LINK_FIELD: process.env.AIRTABLE_CLIENT_LINK_FIELD || 'Client',
+  AIRTABLE_JOB_STATUS_FIELD: process.env.AIRTABLE_JOB_STATUS_FIELD || 'Status',
+  AIRTABLE_JOB_DUE_FIELD: process.env.AIRTABLE_JOB_DUE_FIELD || 'Due',
+  AIRTABLE_JOB_UPDATE_FIELD: process.env.AIRTABLE_JOB_UPDATE_FIELD || 'Latest Update'
+}))
+
+// ===== 3) electron/preload.js =====
+import { contextBridge, ipcRenderer } from 'electron'
+
+contextBridge.exposeInMainWorld('electronAPI', {
+  getEnv: () => ipcRenderer.invoke('env:get')
+})
+
+// ===== 4) renderer/index.html =====
+/*
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quick Edit — Airtable</title>
+    <style>
+      :root { --bg: #0b0b0b; --panel:#111214; --muted:#888; --fg:#eaeaea; --accent:#6ee7b7; --accent-2:#60a5fa; --border:#232323; }
+      html, body, #root { height:100%; }
+      body { margin:0; background:var(--bg); color:var(--fg); font: 14px Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji; }
+      .window { height:100%; display:grid; grid-template-rows: 56px 1fr; }
+      .titlebar { display:flex; align-items:center; gap:12px; padding:0 12px; border-bottom:1px solid var(--border); background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0)); backdrop-filter: blur(8px); -webkit-app-region: drag; }
+      .titlebar .btns { -webkit-app-region: no-drag; margin-left:auto; display:flex; gap:8px; }
+      .btn { border:1px solid var(--border); background:#141518; color:var(--fg); padding:8px 12px; border-radius:12px; cursor:pointer; }
+      .btn.primary { background:linear-gradient(180deg, #223 0%, #151626 100%); border-color:#2a2b3a; }
+      .btn.ghost { background:transparent; }
+      .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+      .card { border:1px solid var(--border); background:var(--panel); border-radius:16px; padding:16px; }
+      .label { color:var(--muted); font-weight:600; margin-bottom:6px; display:block; }
+      .input, .select, textarea, input[type="date"] { width:100%; padding:10px 12px; border-radius:12px; border:1px solid var(--border); background:#0f1012; color:var(--fg); outline:none; }
+      .row { display:flex; gap:12px; align-items:center; }
+      .pill { font-size:12px; border:1px solid var(--border); padding:6px 10px; border-radius:999px; color:var(--muted); }
+      .footer { display:flex; justify-content:space-between; align-items:center; margin-top:12px; }
+      .list { max-height:220px; overflow:auto; border:1px solid var(--border); border-radius:12px; }
+      .list-item { padding:10px 12px; border-bottom:1px solid var(--border); cursor:pointer; display:flex; justify-content:space-between; }
+      .list-item:hover { background:#121318; }
+      .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace; border:1px solid var(--border); background:#0f1012; padding:2px 6px; border-radius:6px; }
+      .muted { color: var(--muted); }
+      .inline { display:inline-flex; gap:6px; align-items:center; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/index.jsx"></script>
+  </body>
+</html>
+*/
+
+// ===== 5) renderer/src/App.jsx =====
+import React, { useEffect, useMemo, useState } from 'react'
+import { ArrowRight, Calendar, Check, ChevronsUpDown, Loader2, RefreshCcw, X } from 'lucide-react'
+import { listClients, listJobsByClient, updateJob } from './airtable'
+import { format } from 'date-fns'
+
+export default function App(){
+  const [env, setEnv] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [clients, setClients] = useState([])
+  const [clientQuery, setClientQuery] = useState('')
+  const [selectedClient, setSelectedClient] = useState(null)
+
+  const [jobs, setJobs] = useState([])
+  const [jobQuery, setJobQuery] = useState('')
+  const [selectedJob, setSelectedJob] = useState(null)
+
+  const [updateText, setUpdateText] = useState('')
+  const [due, setDue] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [toast, setToast] = useState('')
+
+  useEffect(() => {
+    (async () => {
+      const e = await window.electronAPI.getEnv()
+      setEnv(e)
+      const cs = await listClients(e)
+      setClients(cs)
+      setLoading(false)
+    })()
+
+    // Fast action keys inside app (not global):
+    const handler = (ev) => {
+      // Ctrl+Enter to submit
+      if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
+        ev.preventDefault()
+        submit()
+      }
+      // Esc clears selections
+      if (ev.key === 'Escape') {
+        setSelectedJob(null); setJobQuery('');
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
+  useEffect(() => {
+    (async () => {
+      if (!env || !selectedClient) return setJobs([])
+      const js = await listJobsByClient(env, selectedClient)
+      setJobs(js)
+    })()
+  }, [env, selectedClient])
+
+  const filteredClients = useMemo(() => {
+    const q = clientQuery.toLowerCase()
+    return clients.filter(c => c.name.toLowerCase().includes(q))
+  }, [clients, clientQuery])
+
+  const filteredJobs = useMemo(() => {
+    const q = jobQuery.toLowerCase()
+    return jobs.filter(j => j.name.toLowerCase().includes(q))
+  }, [jobs, jobQuery])
+
+  const submit = async () => {
+    if (!selectedJob) { setToast('Pick a job first'); return }
+    setSubmitting(true)
+    try {
+      await updateJob(env, selectedJob.id, {
+        [env.AIRTABLE_JOB_UPDATE_FIELD]: updateText || undefined,
+        [env.AIRTABLE_JOB_DUE_FIELD]: due || undefined,
+      })
+      setToast('Saved ✓')
+      setUpdateText('')
+    } catch (e) {
+      console.error(e)
+      setToast('Save failed')
+    } finally {
+      setSubmitting(false)
+      setTimeout(() => setToast(''), 2000)
+    }
+  }
+
+  if (loading) return <Center>Loading <Loader2 className="spin"/></Center>
+
+  return (
+    <div className="window">
+      <div className="titlebar">
+        <div className="inline"><strong>Quick Edit</strong><span className="pill">Airtable</span></div>
+        <div className="btns">
+          <button className="btn ghost" onClick={()=>location.reload()} title="Reload"><RefreshCcw size={16}/></button>
+          <button className="btn" onClick={()=>window.close()} title="Close"><X size={16}/></button>
+        </div>
+      </div>
+
+      <div style={{ padding:16 }}>
+        <div className="grid">
+          <div className="card">
+            <label className="label">Client</label>
+            <input className="input" placeholder="Type to search…" value={clientQuery} onChange={e=>setClientQuery(e.target.value)} />
+            <div className="list" style={{marginTop:8}}>
+              {filteredClients.map(c => (
+                <div key={c.id} className="list-item" onClick={()=>{setSelectedClient(c); setSelectedJob(null)}}>
+                  <span>{c.name}</span>
+                  {selectedClient?.id===c.id ? <Check size={16}/> : <ChevronsUpDown size={16} className="muted"/>}
+                </div>
+              ))}
+              {!filteredClients.length && <div className="list-item muted">No clients</div>}
+            </div>
+          </div>
+
+          <div className="card">
+            <label className="label">Open jobs {selectedClient ? <span className="muted">for {selectedClient.name}</span> : null}</label>
+            <input className="input" placeholder="Filter jobs…" value={jobQuery} onChange={e=>setJobQuery(e.target.value)} disabled={!selectedClient}/>
+            <div className="list" style={{marginTop:8}}>
+              {filteredJobs.map(j => (
+                <div key={j.id} className="list-item" onClick={()=>setSelectedJob(j)}>
+                  <div>
+                    <div><strong>{j.name}</strong></div>
+                    <div className="muted">Due {j.due ? format(new Date(j.due), 'PP') : '—'}</div>
+                  </div>
+                  {selectedJob?.id===j.id ? <Check size={16}/> : <ArrowRight size={16} className="muted"/>}
+                </div>
+              ))}
+              {selectedClient && !filteredJobs.length && <div className="list-item muted">No open jobs</div>}
+              {!selectedClient && <div className="list-item muted">Pick a client first</div>}
+            </div>
+          </div>
+        </div>
+
+        <div className="card" style={{marginTop:16}}>
+          <div className="row" style={{justifyContent:'space-between'}}>
+            <div className="inline"><span className="label" style={{margin:0}}>Edit</span> {selectedJob ? <span className="pill">{selectedJob.name}</span> : <span className="muted">Nothing selected</span>}</div>
+            <div className="inline muted">Submit with <span className="kbd">Ctrl/⌘+Enter</span></div>
+          </div>
+          <div className="row" style={{marginTop:12}}>
+            <div style={{flex:3}}>
+              <label className="label">Update note</label>
+              <textarea rows={4} value={updateText} onChange={e=>setUpdateText(e.target.value)} placeholder="What changed? New info from email…"></textarea>
+            </div>
+            <div style={{flex:1}}>
+              <label className="label">Due date</label>
+              <div className="row">
+                <Calendar size={16}/>
+                <input type="date" className="input" value={due} onChange={e=>setDue(e.target.value)} />
+              </div>
+            </div>
+          </div>
+          <div className="footer">
+            <div className="muted">Fields: <code>{env?.AIRTABLE_JOB_UPDATE_FIELD}</code> & <code>{env?.AIRTABLE_JOB_DUE_FIELD}</code></div>
+            <div className="row">
+              {toast && <div className="pill">{toast}</div>}
+              <button className="btn primary" disabled={submitting || !selectedJob} onClick={submit}>
+                {submitting ? <Loader2 className="spin" size={16}/> : 'Save changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="muted" style={{marginTop:12}}>
+          Tip: Global hotkey <span className="kbd">Ctrl/⌘+A</span> toggles the window. Inside the app, use <span className="kbd">Ctrl/⌘+Enter</span> to save.
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Center({children}){
+  return <div style={{height:'100%', display:'grid', placeItems:'center'}}>{children}</div>
+}
+
+// ===== 6) renderer/src/index.jsx =====
+import React from 'react'
+import { createRoot } from 'react-dom/client'
+import App from './App'
+
+const root = createRoot(document.getElementById('root'))
+root.render(<App />)
+
+// ===== 7) renderer/src/airtable.js =====
+const API = 'https://api.airtable.com/v0'
+
+async function request(env, path, init={}){
+  const res = await fetch(`${API}/${env.AIRTABLE_BASE_ID}/${encodeURIComponent(path)}`, {
+    ...init,
+    headers: {
+      'Authorization': `Bearer ${env.AIRTABLE_API_KEY}`,
+      'Content-Type': 'application/json',
+      ...(init.headers||{})
+    }
+  })
+  if (!res.ok) throw new Error(`Airtable ${res.status}`)
+  return res.json()
+}
+
+export async function listClients(env){
+  const data = await request(env, env.AIRTABLE_CLIENTS_TABLE, {
+    method: 'GET',
+    headers: {},
+  })
+  // Map to {id, name}
+  return data.records.map(r => ({ id:r.id, name:r.fields.Name || r.fields.Client || r.id }))
+}
+
+export async function listJobsByClient(env, client){
+  const filter = `AND({${env.AIRTABLE_CLIENT_LINK_FIELD}}='${client.name}', NOT({${env.AIRTABLE_JOB_STATUS_FIELD}}='Done'), NOT({${env.AIRTABLE_JOB_STATUS_FIELD}}='Closed'))`
+  const params = new URLSearchParams({ view: 'Grid view', filterByFormula: filter })
+  const data = await request(env, `${env.AIRTABLE_JOBS_TABLE}?${params.toString()}`)
+  return data.records.map(r => ({ id:r.id, name: r.fields.Name || r.fields.Title || r.id, due: r.fields[env.AIRTABLE_JOB_DUE_FIELD] || null }))
+}
+
+export async function updateJob(env, recordId, fields){
+  return request(env, env.AIRTABLE_JOBS_TABLE, {
+    method: 'PATCH',
+    body: JSON.stringify({ records: [{ id: recordId, fields }] })
+  })
+}
+
+// ===== 8) .env =====
+/*
+AIRTABLE_API_KEY=pat_xxx
+AIRTABLE_BASE_ID=appXXXXXXXXXXXXXX
+AIRTABLE_CLIENTS_TABLE=Clients
+AIRTABLE_JOBS_TABLE=Jobs
+AIRTABLE_CLIENT_LINK_FIELD=Client
+AIRTABLE_JOB_STATUS_FIELD=Status
+AIRTABLE_JOB_DUE_FIELD=Due
+AIRTABLE_JOB_UPDATE_FIELD=Latest Update
+*/
+
+// ===== 9) renderer/vite.config.js =====
+/*
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  root: '.',
+  base: './',
+  plugins: [react()],
+  server: { port: 5173, strictPort: true },
+  build: { outDir: '../dist' }
+})
+*/
+
+// ===== 10) README.md =====
+/*
+# Quick Edit App for Airtable
+
+A tiny, fast Electron + React utility to capture quick updates from email and push them into Airtable. Designed for muscle-memory speed:
+
+- **Global hotkey:** Ctrl/⌘+A toggles the window
+- **Type-to-filter** clients and jobs
+- **Ctrl/⌘+Enter** saves the update and optional due date
+
+## 1) Setup
+
+1. **Create an Airtable Personal Access Token** with read/write access to your base.
+2. **Duplicate** `.env` from this canvas and fill in your values.
+3. Ensure your Jobs table has fields matching these env names:
+   - `Client` (Linked record to Clients)
+   - `Status` (where non-open statuses include `Done` or `Closed`)
+   - `Due` (date)
+   - `Latest Update` (long text)
+
+## 2) Install & Run
+
+```bash
+npm i
+npm run dev
+```
+The app window will appear. Try the hotkey **Ctrl/⌘+A** to toggle.
+
+## 3) Build a desktop app
+
+```bash
+npm run build
+```
+This uses electron-builder to create installers/binaries.
+
+## 4) Notes
+- The global hotkey can be changed in `electron/main.js` (search for `globalShortcut.register`).
+- Filter formula assumes client match by **name**. If you prefer link IDs, change the filter to use RECORD_ID() or lookups.
+- For **Airtable rate limits**, this app is light, fetching clients once and jobs on-demand.
+- Styling is custom CSS for speed; swap in Tailwind if you like.
+- If your base uses different field names, update the `.env` or the env defaults in `main.js`.
+*/
