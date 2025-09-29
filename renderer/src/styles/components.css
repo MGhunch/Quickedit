@@ -1,0 +1,98 @@
+.window {
+  height: 100%;
+  display: grid;
+  grid-template-rows: 56px 1fr;
+}
+
+/* Title bar */
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0));
+  backdrop-filter: blur(8px);
+  -webkit-app-region: drag;
+}
+.titlebar .btns {
+  -webkit-app-region: no-drag;
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+/* Buttons */
+.btn {
+  border: 1px solid var(--border);
+  background: #141518;
+  color: var(--fg);
+  padding: 8px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn:hover { background: #1b1c21; }
+.btn.primary {
+  background: linear-gradient(180deg, #223 0%, #151626 100%);
+  border-color: #2a2b3a;
+}
+.btn.ghost {
+  background: transparent;
+}
+
+/* Layout grid */
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+/* Card */
+.card {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 16px;
+  padding: 16px;
+}
+
+/* Labels, inputs */
+.label {
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 6px;
+  display: block;
+}
+.input, .select, textarea, input[type="date"] {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #0f1012;
+  color: var(--fg);
+  outline: none;
+}
+textarea { resize: vertical; }
+
+/* Rows, pills */
+.row { display: flex; gap: 12px; align-items: center; }
+.pill {
+  font-size: 12px;
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: var(--muted);
+}
+.footer { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
+
+/* List */
+.list {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.list-item {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+}
+.list-item:hover { background: #121318; }
