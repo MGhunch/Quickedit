@@ -4,7 +4,6 @@ import { listClients, listJobsByClient, updateJob } from './airtable'
 import { format } from 'date-fns'
 
 export default function App(){
-  const [env, setEnv] = useState(null)
   const [loading, setLoading] = useState(true)
   const [clients, setClients] = useState([])
   const [clientQuery, setClientQuery] = useState('')
@@ -21,16 +20,14 @@ export default function App(){
 
   useEffect(() => {
     (async () => {
-      const e = await window.electronAPI.getEnv()
-      setEnv(e)
-      const cs = await listClients(e)
+      const cs = await listClients()
       setClients(cs)
       setLoading(false)
     })()
 
-    // Keyboard shortcuts inside the app
+    // In-app keyboard shortcuts
     const handler = (ev) => {
-      // Ctrl+Enter to submit
+      // Ctrl/Cmd + Enter to submit
       if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
         ev.preventDefault()
         submit()
@@ -46,11 +43,11 @@ export default function App(){
 
   useEffect(() => {
     (async () => {
-      if (!env || !selectedClient) return setJobs([])
-      const js = await listJobsByClient(env, selectedClient)
+      if (!selectedClient) return setJobs([])
+      const js = await listJobsByClient(null, selectedClient)
       setJobs(js)
     })()
-  }, [env, selectedClient])
+  }, [selectedClient])
 
   const filteredClients = useMemo(() => {
     const q = clientQuery.toLowerCase()
@@ -66,10 +63,7 @@ export default function App(){
     if (!selectedJob) { setToast('Pick a job first'); return }
     setSubmitting(true)
     try {
-      await updateJob(env, selectedJob.id, {
-        [env.AIRTABLE_JOB_UPDATE_FIELD]: updateText || undefined,
-        [env.AIRTABLE_JOB_DUE_FIELD]: due || undefined,
-      })
+      await updateJob(null, selectedJob.id, { updateText, due })
       setToast('Saved ✓')
       setUpdateText('')
     } catch (e) {
@@ -150,7 +144,7 @@ export default function App(){
             </div>
           </div>
           <div className="footer">
-            <div className="muted">Fields: <code>{env?.AIRTABLE_JOB_UPDATE_FIELD}</code> & <code>{env?.AIRTABLE_JOB_DUE_FIELD}</code></div>
+            <div className="muted">Updates save directly to Airtable.</div>
             <div className="row">
               {toast && <div className="pill">{toast}</div>}
               <button className="btn primary" disabled={submitting || !selectedJob} onClick={submit}>
@@ -161,7 +155,7 @@ export default function App(){
         </div>
 
         <div className="muted" style={{marginTop:12}}>
-          Tip: Global hotkey <span className="kbd">Ctrl/⌘+A</span> toggles the window. Inside the app, use <span className="kbd">Ctrl/⌘+Enter</span> to save.
+          Tip: Use <span className="kbd">Ctrl/⌘+Enter</span> to save quickly.
         </div>
       </div>
     </div>
